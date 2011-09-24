@@ -1,17 +1,15 @@
+/**
+ * dependencies.
+ */
+var db = require('./lib/db');
 
 /**
- * Bootstrap app.
+ * External Module dependencies.
  */
 
 require.paths.unshift(__dirname + '/../../lib/');
 
-/**
- * Module dependencies.
- */
-
 var express = require('express')
-  , stylus = require('stylus')
-  , nib = require('nib')
   , sio = require('socket.io');
 
 /**
@@ -25,16 +23,10 @@ var app = express.createServer();
  */
 
 app.configure(function () {
-  app.use(stylus.middleware({ src: __dirname + '/public', compile: compile }))
+  //app.use(stylus.middleware({ src: __dirname + '/public', compile: compile }))
   app.use(express.static(__dirname + '/public'));
   app.set('views', __dirname);
   app.set('view engine', 'jade');
-
-  function compile (str, path) {
-    return stylus(str)
-      .set('filename', path)
-      .use(nib());
-  };
 });
 
 /**
@@ -58,10 +50,10 @@ app.listen(3000, function () {
  * Socket.IO server (single process only)
  */
 
-var io = sio.listen(app)
-  , nicknames = {};
+var io = sio.listen(app);
 
-var recent_messages = [];
+var recent_messages = [],
+		nicknames = {};
 
 io.sockets.on('connection', function (socket) {
 	
@@ -83,20 +75,44 @@ io.sockets.on('connection', function (socket) {
   });
 
   socket.on('nickname', function (nick, fn) {
-    if (nicknames[nick]) {
-      fn(true);
-    } else {
-      fn(false);
-      nicknames[nick] = socket.nickname = nick;
-      socket.broadcast.emit('announcement', nick + ' connected');
-      io.sockets.emit('nicknames', nicknames);
-    }
+
+		var new_user = new db.User({nick: nick});
+		
+		new_user.save(function(err) {
+			
+			if (err) {
+		
+				fn(true);
+				
+			} else {
+		
+				fn(false);
+				nicknames[nick] = socket.nickname = nick;
+				socket.broadcast.emit('announcement', nick + ' connected');
+	      io.sockets.emit('nicknames', nicknames);
+			}
+		});
   });
 
   socket.on('disconnect', function () {
     if (!socket.nickname) return;
 
+		// TODO: mark as disconnected in DB
+		
     delete nicknames[socket.nickname];
+
+		var conditions = { nick: socket.nickname }
+		  , update = { connected: false, last_connected: new Date() }
+		  , options = { multi: false }
+		  , callback = null;
+
+		db.User.update(conditions, update, options, function(err) {
+			
+			if (err) {
+				console.warn('Updating disconnected user record failed');
+			}
+		});
+
     socket.broadcast.emit('announcement', socket.nickname + ' disconnected');
     socket.broadcast.emit('nicknames', nicknames);
   });
